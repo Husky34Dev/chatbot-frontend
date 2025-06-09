@@ -17,7 +17,7 @@ if st.button("Enviar") and user_input:
 
     try:
         response = requests.post(
-            "https://TU_NOMBRE_DE_RENDER.onrender.com/extraer",
+            "https://agent-mcp-demo.onrender.com/extraer",
             json={"mensaje": user_input}
         )
         if response.status_code == 200:
