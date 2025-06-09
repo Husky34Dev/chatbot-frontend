@@ -1,40 +1,66 @@
 import streamlit as st
+from transformers import AutoTokenizer, AutoModelForCausalLM, TextStreamer
+from huggingface_hub import login
 import requests
+import sseclient
+import json
 
-# Configuración de la página
-st.set_page_config(page_title="Chatbot de Consultas de Abonados", page_icon="🤖")
+st.set_page_config(page_title="Agente Chatbot", page_icon="🤖")
+st.title("🤖 Agente Chatbot Inteligente")
+st.write("Pregunta lo que quieras sobre abonados y el agente consultará la base de datos en tiempo real.")
 
-st.title("🤖 Chatbot de Consultas de Abonados")
-st.write("Haz una pregunta sobre un abonado y te devolverá la respuesta directamente desde la base de datos.")
+# Dirección de tu backend en Render
+BACKEND_MCP_URL = "https://agent-mcp-demo.onrender.com/mcp"  # <-- cámbiala por la tuya real
 
-# Historial de mensajes
-if "messages" not in st.session_state:
-    st.session_state.messages = []
+# Modelo (puedes cambiar a otro si prefieres)
+MODEL_NAME = "TinyLlama/TinyLlama-1.1B-Chat-v1.0"
 
-# Entrada del usuario
-user_input = st.text_input("Tu mensaje:", key="input")
+@st.cache_resource
+def load_model():
+    tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
+    model = AutoModelForCausalLM.from_pretrained(MODEL_NAME, torch_dtype="auto")
+    return tokenizer, model
 
-# Acción al pulsar el botón
+tokenizer, model = load_model()
+
+if "history" not in st.session_state:
+    st.session_state.history = []
+
+user_input = st.text_input("Tú:", key="user_input")
+
 if st.button("Enviar") and user_input:
-    st.session_state.messages.append(("🧑‍💬 Tú", user_input))
+    st.session_state.history.append(("🧑‍💬", user_input))
 
+    # Instrucción para el agente
+    system_prompt = (
+        "Eres un agente inteligente que responde preguntas sobre facturas y datos personales. "
+        "Usa las herramientas MCP disponibles para obtener la información necesaria y responde de forma clara."
+    )
+    full_input = system_prompt + "\n\nUsuario: " + user_input
+
+    # Petición al backend vía SSE
     try:
-        # CAMBIA ESTA URL por la de tu backend en Render
         response = requests.post(
-            "https://chatbot-agent.onrender.com/extraer",
-            json={"mensaje": user_input}
+            BACKEND_MCP_URL,
+            stream=True,
+            headers={"Content-Type": "application/json"},
+            data=json.dumps({"input": user_input})
         )
-        if response.status_code == 200:
-            result = response.json()["data"][0]
-            text = result["respuesta"]
-        else:
-            text = "❌ Error al procesar la respuesta."
+        client = sseclient.SSEClient(response)
+        msg = ""
+        for event in client.events():
+            if event.event == "complete":
+                resultado = json.loads(event.data)
+                msg = resultado["data"][0]["respuesta"]
+                break
+        if not msg:
+            msg = "⚠️ No se recibió respuesta del backend."
     except Exception as e:
-        text = f"⚠️ Error de conexión: {e}"
+        msg = f"❌ Error de conexión: {e}"
 
-    st.session_state.messages.append(("🤖 Chatbot", text))
+    st.session_state.history.append(("🤖", msg))
 
-# Mostrar conversación
-for sender, msg in reversed(st.session_state.messages):
-    with st.chat_message(sender):
-        st.markdown(msg)
+# Mostrar historial
+for speaker, text in reversed(st.session_state.history):
+    with st.chat_message(speaker):
+        st.markdown(text)

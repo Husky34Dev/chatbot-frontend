@@ -1,2 +1,5 @@
 streamlit
+transformers
+huggingface_hub
 requests
+sseclient-py
